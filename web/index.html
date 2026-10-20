@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#121a22">
+<title>NodeWatch — мониторинг узлов</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M2 17h7l3-8 5 15 4-11 2 4h7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>NodeWatch</span>
+  </div>
+  <div class="pulse" id="pulse">
+    <span class="pulse-item"><b id="sum-online">–</b> из <b id="sum-total">–</b> узлов онлайн</span>
+    <span class="pulse-item alert" id="sum-open-wrap"><b id="sum-open">–</b> открытых инцидентов</span>
+  </div>
+  <button class="icon-btn" id="sound-btn" title="Звук при новом инциденте" aria-pressed="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path class="wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+  </button>
+</header>
+
+<nav class="tabs" id="tabs" aria-label="Разделы">
+  <button data-tab="agents" class="active">
+    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>
+    <span>Агенты</span></button>
+  <button data-tab="report">
+    <svg viewBox="0 0 24 24"><path d="M3 19h18M5 15l4-5 4 3 6-8"/></svg>
+    <span>Отчёт</span></button>
+  <button data-tab="incidents">
+    <svg viewBox="0 0 24 24"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/></svg>
+    <span>Инциденты</span><i class="badge" id="inc-badge" hidden>0</i></button>
+  <button data-tab="thresholds">
+    <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+    <span>Пороги</span></button>
+</nav>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<main>
+  <!-- АГЕНТЫ -->
+  <section class="view active" id="view-agents">
+    <div class="view-head">
+      <h1>Узлы</h1>
+      <p class="hint" id="agents-hint">Статус «молчит» — агент на связи, но метрики не приходят дольше порога.</p>
+    </div>
+    <div class="table-wrap">
+      <table class="grid agents" id="agents-table">
+        <thead><tr>
+          <th>Узел</th><th>Статус</th><th>IP</th><th>Последний пакет</th><th class="num">Пакеты</th>
+          <th class="num">Потери</th><th class="num">Буфер</th><th class="num">Инциденты</th><th>Профиль · интервал</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="empty" id="agents-empty" hidden>
+      <h2>Пока ни одного агента</h2>
+      <p>Запустите на узле <code>start-agent.bat</code> (или <code>python agent.py --host IP_СЕРВЕРА</code>) с тем же секретом MON_SECRET — узел появится здесь через пару секунд.</p>
+    </div>
+  </section>
+
+  <!-- ОТЧЁТ -->
+  <section class="view" id="view-report">
+    <div class="view-head">
+      <h1>Отчёт по узлу</h1>
+      <div class="node-pick" id="node-pick"></div>
+    </div>
+    <div class="report-meta" id="report-meta"></div>
+    <div class="cores" id="cores"></div>
+    <div class="charts" id="charts"></div>
+    <h2 class="sub">Сводка по буферу</h2>
+    <div class="table-wrap">
+      <table class="grid summary" id="summary-table">
+        <thead><tr><th>Метрика</th><th class="num">Среднее</th><th class="num">p95</th><th class="num">Максимум</th><th class="num">Последнее</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ИНЦИДЕНТЫ -->
+  <section class="view" id="view-incidents">
+    <div class="view-head">
+      <h1>Инциденты</h1>
+      <div class="filters">
+        <label>Узел <select id="f-node"><option value="">все</option></select></label>
+        <label>Правило <select id="f-rule"><option value="">все</option></select></label>
+        <label>Статус <select id="f-status">
+          <option value="">все</option><option value="open">открытые</option><option value="acknowledged">подтверждённые</option>
+        </select></label>
+        <button class="btn ghost" id="inc-refresh">Обновить</button>
+      </div>
+    </div>
+    <ul class="inc-list" id="inc-list"></ul>
+    <div class="empty" id="inc-empty" hidden>
+      <h2>Инцидентов нет</h2>
+      <p>Чтобы проверить уведомления, нажмите «Тест-инцидент» на вкладке «Агенты».</p>
+    </div>
+  </section>
+
+  <!-- ПОРОГИ -->
+  <section class="view" id="view-thresholds">
+    <div class="view-head">
+      <h1>Пороги анализатора</h1>
+      <p class="hint">Изменения применяются сразу, без перезапуска сервера, и сохраняются в data/thresholds.json.</p>
+    </div>
+    <form id="th-form" class="th-form"></form>
+    <div class="savebar" id="savebar">
+      <span id="th-dirty">Изменений нет</span>
+      <button class="btn ghost" type="button" id="th-reset">Сбросить к умолчаниям</button>
+      <button class="btn primary" type="button" id="th-save" disabled>Сохранить</button>
+    </div>
+  </section>
+</main>
+
+<!-- карточка инцидента / снимок -->
+<div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <button class="icon-btn drawer-close" id="drawer-close" title="Закрыть">
+    <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  </button>
+  <div id="drawer-body"></div>
+</aside>
+
+<!-- маленький диалог ввода -->
+<dialog id="ask">
+  <form method="dialog">
+    <h3 id="ask-title"></h3>
+    <p id="ask-text"></p>
+    <input id="ask-input" autocomplete="off">
+    <menu>
+      <button value="cancel" class="btn ghost">Отмена</button>
+      <button value="ok" class="btn primary" id="ask-ok">OK</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- вход без токена -->
+<div class="login" id="login" hidden>
+  <form id="login-form">
+    <h1>Нужен токен панели</h1>
+    <p>Откройте ссылку из лога сервера (она содержит <code>#token=…</code>) или вставьте токен сюда.</p>
+    <input id="login-token" placeholder="токен из лога сервера" autocomplete="off">
+    <button class="btn primary">Войти</button>
+    <p class="error" id="login-error"></p>
+  </form>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
